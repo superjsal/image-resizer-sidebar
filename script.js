@@ -155,8 +155,6 @@ function drawCentered(bitmap, w, h, targetCtx, targetCanvas) {
   targetCtx.drawImage(bitmap, sx, sy, cropW, cropH, 0, 0, w, h);
 }
 
-// Pre-bakes a blob URL so the Save anchor is a real user-initiated click,
-// not a programmatic download that browsers would block as a popup.
 async function bitmapToObjectURL(bitmap, w, h, quality) {
   const off = document.createElement("canvas");
   drawCentered(bitmap, w, h, off.getContext("2d"), off);
@@ -331,7 +329,6 @@ async function loadImages(files) {
 
 // --- Download all ---
 
-// Triggers each card's pre-baked anchor rather than programmatic downloads (popup blocker safe)
 function downloadAll() {
   if (!images.length || isExporting) return;
 
