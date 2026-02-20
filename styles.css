@@ -36,6 +36,9 @@
   --font: "Inter", ui-sans-serif, -apple-system, system-ui, sans-serif;
 }
 
+/* Base font for all interactive elements — avoids repeating font-family on each component */
+button, input, a { font-family: var(--font); }
+
 body.light {
   --bg:         #eceef2;
   --surface:    #ffffff;
@@ -77,9 +80,8 @@ body.light {
 
 body {
   min-height: 100vh;
-  background: #06080d;
+  background: var(--bg);
   color: var(--text);
-  font-family: var(--font);
   -webkit-font-smoothing: antialiased;
   display: flex;
   justify-content: center;
@@ -299,7 +301,6 @@ body.light .theme-toggle .icon-sun  { display: block; }
   background: transparent;
   color: var(--text);
   font-size: 12px;
-  font-family: var(--font);
   font-variant-numeric: tabular-nums;
   outline: none;
 }
@@ -338,7 +339,6 @@ body.light .theme-toggle .icon-sun  { display: block; }
   color: var(--text-2);
   font-size: 12px;
   font-weight: 500;
-  font-family: var(--font);
   cursor: pointer;
   transition: background 0.12s, color 0.12s;
 }
@@ -420,7 +420,6 @@ body.light .theme-toggle .icon-sun  { display: block; }
   border-radius: var(--radius-xs);
   font-size: 12px;
   font-weight: 600;
-  font-family: var(--font);
   cursor: pointer;
   border: 1px solid transparent;
   text-align: center;
@@ -453,7 +452,6 @@ body.light .theme-toggle .icon-sun  { display: block; }
   background: var(--surface-2);
   color: var(--text);
   font-size: 12px;
-  font-family: var(--font);
   cursor: pointer;
   white-space: nowrap;
   box-shadow: var(--shadow-card);
@@ -487,7 +485,6 @@ body.light .theme-toggle .icon-sun  { display: block; }
   background: transparent;
   font-size: 12px;
   font-weight: 500;
-  font-family: var(--font);
   cursor: pointer;
   margin-left: auto;
   transition: background 0.12s, border-color 0.12s;
@@ -559,6 +556,7 @@ body.light .theme-toggle .icon-sun  { display: block; }
   transition: opacity 0.2s;
 }
 .canvas-empty.hidden { opacity: 0; }
+.canvas-empty-icon { opacity: 0.35; }
 
 .canvas-badge {
   position: absolute;
@@ -681,7 +679,6 @@ body.light .theme-toggle .icon-sun  { display: block; }
   color: var(--text-2);
   font-size: 12px;
   font-weight: 500;
-  font-family: var(--font);
   text-decoration: none;
   cursor: pointer;
   transition: background 0.12s, border-color 0.12s, color 0.12s;
@@ -692,3 +689,62 @@ body.light .theme-toggle .icon-sun  { display: block; }
 
 /* Divider */
 .divider { height: 1px; background: var(--border); margin: 12px 0; }
+
+
+/* Crop anchor picker — overlaid on the thumbnail, bottom-right corner */
+
+.anchor-picker {
+  position: absolute;
+  bottom: 5px;
+  right: 5px;
+  display: grid;
+  grid-template-columns: repeat(3, 8px);
+  grid-template-rows: repeat(3, 8px);
+  gap: 2px;
+  padding: 4px;
+  border-radius: 5px;
+  background: rgba(0,0,0,0.62);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border: 1px solid rgba(255,255,255,0.12);
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 2;
+}
+
+/* Show picker on card hover OR when this card is selected */
+.preview-item:hover .anchor-picker,
+.preview-item.selected .anchor-picker {
+  opacity: 1;
+}
+
+.anchor-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  border: none;
+  background: rgba(255,255,255,0.30);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.1s, transform 0.1s, box-shadow 0.1s;
+}
+
+.anchor-dot:hover {
+  background: rgba(255,255,255,0.75);
+  transform: scale(1.3);
+}
+
+.anchor-dot.active {
+  background: var(--gradient);
+  box-shadow: 0 0 4px rgba(10,132,255,0.7);
+}
+
+/* Dots on a locked axis are visually dimmed */
+.anchor-dot.axis-dim {
+  background: rgba(255,255,255,0.10);
+  cursor: not-allowed;
+}
+.anchor-dot.axis-dim:hover {
+  background: rgba(255,255,255,0.18);
+  transform: none;
+}

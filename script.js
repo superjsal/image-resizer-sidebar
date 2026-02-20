@@ -47,17 +47,31 @@ const qualityHints = {
   "0.92": "Sharp output, larger file size",
 };
 
+// Crop anchor positions — label, x (0–1), y (0–1)
+const ANCHORS = [
+  { label: "Top left",     x: 0,   y: 0   },
+  { label: "Top center",   x: 0.5, y: 0   },
+  { label: "Top right",    x: 1,   y: 0   },
+  { label: "Left",         x: 0,   y: 0.5 },
+  { label: "Center",       x: 0.5, y: 0.5 },
+  { label: "Right",        x: 1,   y: 0.5 },
+  { label: "Bottom left",  x: 0,   y: 1   },
+  { label: "Bottom center",x: 0.5, y: 1   },
+  { label: "Bottom right", x: 1,   y: 1   },
+];
+
+const DEFAULT_ANCHOR = { x: 0.5, y: 0.5 };
+
+
 
 // --- Helpers ---
 
 const plural = (n) => n !== 1 ? "s" : "";
 
-// Revokes all blob URLs in the grid to free memory
 function revokeGrid() {
   previewGrid.querySelectorAll("a[data-objurl]").forEach(a => URL.revokeObjectURL(a.href));
 }
 
-// Resets the UI back to the empty/no-images state
 function resetUI() {
   revokeGrid();
   images.forEach(item => item.bitmap.close());
@@ -130,24 +144,32 @@ function setStatus(msg, state = "idle") {
   statusText.textContent = msg;
   statusDot.className = "status-dot" + (state !== "idle" ? ` ${state}` : "");
   statusBar.classList.remove("flash");
-  void statusBar.offsetWidth; // re-trigger animation
+  void statusBar.offsetWidth;
   statusBar.classList.add("flash");
 }
 
 
 // --- Canvas drawing ---
 
-// Center-crops the bitmap to exactly w×h — always fills without letterboxing
-function drawCentered(bitmap, w, h, targetCtx, targetCanvas) {
+// Returns the source crop rect for a bitmap scaled to fill w×h at a given anchor.
+// Shared by drawCropped and getSlack so the math never diverges.
+function getCropRect(bitmap, w, h, anchor = DEFAULT_ANCHOR) {
   const scale = Math.max(w / bitmap.width, h / bitmap.height);
   const cropW = Math.round(w / scale);
   const cropH = Math.round(h / scale);
-  const sx    = Math.floor((bitmap.width  - cropW) / 2);
-  const sy    = Math.floor((bitmap.height - cropH) / 2);
+  return {
+    sx: Math.floor((bitmap.width  - cropW) * anchor.x),
+    sy: Math.floor((bitmap.height - cropH) * anchor.y),
+    cropW, cropH,
+  };
+}
 
+// Crops the bitmap to exactly w×h using a positional anchor (x/y each 0–1).
+// 0,0 = top-left   0.5,0.5 = center   1,1 = bottom-right
+function drawCropped(bitmap, w, h, targetCtx, targetCanvas, anchor = DEFAULT_ANCHOR) {
+  const { sx, sy, cropW, cropH } = getCropRect(bitmap, w, h, anchor);
   targetCanvas.width  = w;
   targetCanvas.height = h;
-
   targetCtx.fillStyle = "#000";
   targetCtx.fillRect(0, 0, w, h);
   targetCtx.imageSmoothingEnabled = true;
@@ -155,9 +177,9 @@ function drawCentered(bitmap, w, h, targetCtx, targetCanvas) {
   targetCtx.drawImage(bitmap, sx, sy, cropW, cropH, 0, 0, w, h);
 }
 
-async function bitmapToObjectURL(bitmap, w, h, quality) {
+async function bitmapToObjectURL(bitmap, w, h, quality, anchor = DEFAULT_ANCHOR) {
   const off = document.createElement("canvas");
-  drawCentered(bitmap, w, h, off.getContext("2d"), off);
+  drawCropped(bitmap, w, h, off.getContext("2d"), off, anchor);
   const blob = await new Promise(r => off.toBlob(r, "image/jpeg", quality));
   return blob ? URL.createObjectURL(blob) : null;
 }
@@ -172,7 +194,8 @@ async function updatePreview() {
   canvas.style.opacity = "0.5";
   await new Promise(r => setTimeout(r, 60));
 
-  drawCentered(images[selectedIndex].bitmap, activeSize.w, activeSize.h, ctx, canvas);
+  const item = images[selectedIndex];
+  drawCropped(item.bitmap, activeSize.w, activeSize.h, ctx, canvas, item.cropAnchor);
   canvas.style.opacity = "1";
   canvasEmpty.classList.add("hidden");
   canvasBadge.textContent = `${activeSize.w} × ${activeSize.h}`;
@@ -187,8 +210,83 @@ async function updatePreview() {
 
 // --- Thumbnail grid ---
 
-const svgDownload = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
-const svgCheck    = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+// Inline SVG strings for dynamically-built card buttons.
+// lucide.createIcons() only works on static HTML, not innerHTML, so these stay as SVG strings.
+const svgDownload = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+const svgCheck    = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
+
+// Returns whether each axis has any moveable crop slack at the current output size.
+function getSlack(bitmap) {
+  const { w, h } = activeSize;
+  const { cropW, cropH } = getCropRect(bitmap, w, h);
+  return {
+    hasH: cropW < bitmap.width - 1,
+    hasV: cropH < bitmap.height - 1,
+  };
+}
+
+// Builds the 3x3 anchor picker overlay, pinned to the bottom-right of the thumbnail.
+// Dots on a locked axis are dimmed so users can see at a glance what moves.
+function buildAnchorPicker(imageIndex) {
+  const item = images[imageIndex];
+  const { hasH, hasV } = getSlack(item.bitmap);
+
+  const wrap = document.createElement("div");
+  wrap.className = "anchor-picker";
+
+  ANCHORS.forEach(a => {
+    const dot = document.createElement("button");
+    // Dim dots that sit on a locked axis
+    const hLocked = !hasH && a.x !== 0.5;
+    const vLocked = !hasV && a.y !== 0.5;
+    dot.className = "anchor-dot" + (hLocked || vLocked ? " axis-dim" : "");
+    dot.title = a.label + (!hasH && !hasV ? " (fully locked)" : hLocked ? " (H locked)" : vLocked ? " (V locked)" : "");
+
+    const currentAnchor = item.cropAnchor;
+    if (a.x === currentAnchor.x && a.y === currentAnchor.y) dot.classList.add("active");
+
+    dot.addEventListener("click", e => {
+      e.stopPropagation();
+      images[imageIndex].cropAnchor = { x: a.x, y: a.y };
+      wrap.querySelectorAll(".anchor-dot").forEach((d, di) => {
+        d.classList.toggle("active", ANCHORS[di].x === a.x && ANCHORS[di].y === a.y);
+      });
+      refreshCard(imageIndex);
+    });
+
+    wrap.appendChild(dot);
+  });
+
+  return wrap;
+}
+
+// Refreshes a single card's thumbnail + download blob without re-rendering the whole grid.
+async function refreshCard(imageIndex) {
+  const item = images[imageIndex];
+  const { w, h } = activeSize;
+
+  // Re-draw the thumbnail canvas in this card
+  const card = previewGrid.children[imageIndex];
+  if (card) {
+    const thumb = card.querySelector("canvas");
+    if (thumb) {
+      drawCropped(item.bitmap, w, h, thumb.getContext("2d"), thumb, item.cropAnchor);
+    }
+
+    // Revoke old blob and bake a new one
+    const dlBtn = card.querySelector("a.card-dl-btn");
+    if (dlBtn) {
+      if (dlBtn.href.startsWith("blob:")) URL.revokeObjectURL(dlBtn.href);
+      const url = await bitmapToObjectURL(item.bitmap, w, h, activeQuality, item.cropAnchor);
+      if (url) dlBtn.href = url;
+    }
+  }
+
+  // Also update the main preview canvas if this is the selected image
+  if (imageIndex === selectedIndex) {
+    drawCropped(item.bitmap, activeSize.w, activeSize.h, ctx, canvas, item.cropAnchor);
+  }
+}
 
 async function renderGrid() {
   revokeGrid();
@@ -217,13 +315,15 @@ async function renderGrid() {
     const scale  = 160 / w;
     thumb.width  = Math.round(w * scale);
     thumb.height = Math.round(h * scale);
-    drawCentered(item.bitmap, w, h, thumb.getContext("2d"), thumb);
+    drawCropped(item.bitmap, w, h, thumb.getContext("2d"), thumb, item.cropAnchor);
 
     const overlay = document.createElement("div");
     overlay.className   = "thumb-overlay";
     overlay.textContent = "Click to preview";
 
-    thumbWrap.append(thumb, overlay);
+    // Anchor picker lives on the thumbnail so you're pointing at the area you want
+    const anchorPicker = buildAnchorPicker(i);
+    thumbWrap.append(thumb, overlay, anchorPicker);
     thumbWrap.addEventListener("click", () => { selectedIndex = i; updatePreview(); });
 
     const info   = document.createElement("div");
@@ -239,7 +339,7 @@ async function renderGrid() {
 
     info.append(nameEl, dimsEl);
 
-    const url   = await bitmapToObjectURL(item.bitmap, w, h, activeQuality);
+    const url   = await bitmapToObjectURL(item.bitmap, w, h, activeQuality, item.cropAnchor);
     const dlBtn = document.createElement("a");
     dlBtn.className      = "card-dl-btn";
     dlBtn.href           = url;
@@ -283,7 +383,6 @@ function removeImage(index) {
 
 // --- Loading files ---
 
-// If images are already loaded, ask whether to replace or add rather than silently stacking
 function handleFileInput(fileList) {
   const files = [...fileList].filter(f => f.type.startsWith("image/"));
   if (!files.length) { setStatus("No valid images found."); return; }
@@ -314,14 +413,15 @@ async function loadImages(files) {
   setStep(2);
   setStatus(`Loading ${files.length} image${plural(files.length)}…`, "busy");
 
-  for (const file of files) {
-    try {
-      const bitmap = await createImageBitmap(file);
-      images.push({ bitmap, name: file.name });
-    } catch {
-      console.warn("Skipped unreadable file:", file.name);
-    }
-  }
+  // Decode all files in parallel — much faster when loading multiple images at once
+  const results = await Promise.all(
+    files.map(file =>
+      createImageBitmap(file)
+        .then(bitmap => ({ bitmap, name: file.name, cropAnchor: { ...DEFAULT_ANCHOR } }))
+        .catch(() => { console.warn("Skipped unreadable file:", file.name); return null; })
+    )
+  );
+  images.push(...results.filter(Boolean));
 
   await updatePreview();
 }
@@ -489,4 +589,3 @@ if (!presetRestored) {
 canvasBadge.textContent = `${activeSize.w} × ${activeSize.h}`;
 setStep(1);
 setStatus("Choose a size, then load your images.");
-downloadBtn.disabled = true;
