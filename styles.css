@@ -38,6 +38,9 @@
   --font: "Inter", ui-sans-serif, -apple-system, system-ui, sans-serif;
 }
 
+/* Base font for all interactive elements */
+button, input, a { font-family: var(--font); }
+
 body.light {
   --bg:         #eceef2;
   --surface:    #fafafa;
@@ -81,7 +84,7 @@ body.light {
 
 body {
   min-height: 100vh;
-  background: #06080d;
+  background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   -webkit-font-smoothing: antialiased;
@@ -563,6 +566,7 @@ body.light .theme-toggle .icon-sun  { display: block; }
   transition: opacity 0.2s;
 }
 .canvas-empty.hidden { opacity: 0; }
+.canvas-empty-icon { opacity: 0.35; }
 
 .canvas-badge {
   position: absolute;

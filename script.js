@@ -62,8 +62,6 @@ const ANCHORS = [
 
 const DEFAULT_ANCHOR = { x: 0.5, y: 0.5 };
 
-function anchorKey(a) { return `${a.x},${a.y}`; }
-
 
 // --- Helpers ---
 
@@ -152,6 +150,19 @@ function setStatus(msg, state = "idle") {
 
 // --- Canvas drawing ---
 
+// Returns the source crop rect for a bitmap scaled to fill w×h at a given anchor.
+// Shared by drawCropped and getSlack so the math never diverges.
+function getCropRect(bitmap, w, h, anchor = DEFAULT_ANCHOR) {
+  const scale = Math.max(w / bitmap.width, h / bitmap.height);
+  const cropW = Math.round(w / scale);
+  const cropH = Math.round(h / scale);
+  return {
+    sx: Math.floor((bitmap.width  - cropW) * anchor.x),
+    sy: Math.floor((bitmap.height - cropH) * anchor.y),
+    cropW, cropH,
+  };
+}
+
 // Crops the bitmap to exactly w×h using a positional anchor (x/y each 0–1).
 // 0,0 = top-left   0.5,0.5 = center   1,1 = bottom-right
 //
@@ -159,11 +170,7 @@ function setStatus(msg, state = "idle") {
 // repeatedly until we're within 2x of the target, then doing the final draw.
 // A single-pass resample over 4-5x produces soft/mushy results; stepping avoids that.
 function drawCropped(bitmap, w, h, targetCtx, targetCanvas, anchor = DEFAULT_ANCHOR) {
-  const scale = Math.max(w / bitmap.width, h / bitmap.height);
-  const cropW = Math.round(w / scale);
-  const cropH = Math.round(h / scale);
-  const sx    = Math.floor((bitmap.width  - cropW) * anchor.x);
-  const sy    = Math.floor((bitmap.height - cropH) * anchor.y);
+  const { sx, sy, cropW, cropH } = getCropRect(bitmap, w, h, anchor);
 
   targetCanvas.width  = w;
   targetCanvas.height = h;
@@ -252,9 +259,7 @@ const svgCheck    = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="
 // If cropW >= bitmap.width there is no horizontal slack (left = center = right).
 function getSlack(bitmap) {
   const { w, h } = activeSize;
-  const scale = Math.max(w / bitmap.width, h / bitmap.height);
-  const cropW = Math.round(w / scale);
-  const cropH = Math.round(h / scale);
+  const { cropW, cropH } = getCropRect(bitmap, w, h);
   return {
     hasH: cropW < bitmap.width - 1,
     hasV: cropH < bitmap.height - 1,
@@ -279,13 +284,13 @@ function buildAnchorPicker(imageIndex) {
     dot.title = a.label + (!hasH && !hasV ? " (fully locked)" : hLocked ? " (H locked)" : vLocked ? " (V locked)" : "");
 
     const currentAnchor = item.cropAnchor;
-    if (anchorKey(a) === anchorKey(currentAnchor)) dot.classList.add("active");
+    if (a.x === currentAnchor.x && a.y === currentAnchor.y) dot.classList.add("active");
 
     dot.addEventListener("click", e => {
       e.stopPropagation();
       images[imageIndex].cropAnchor = { x: a.x, y: a.y };
       wrap.querySelectorAll(".anchor-dot").forEach((d, di) => {
-        d.classList.toggle("active", anchorKey(ANCHORS[di]) === anchorKey({ x: a.x, y: a.y }));
+        d.classList.toggle("active", ANCHORS[di].x === a.x && ANCHORS[di].y === a.y);
       });
       refreshCard(imageIndex);
     });
@@ -449,14 +454,15 @@ async function loadImages(files) {
   setStep(2);
   setStatus(`Loading ${files.length} image${plural(files.length)}…`, "busy");
 
-  for (const file of files) {
-    try {
-      const bitmap = await createImageBitmap(file);
-      images.push({ bitmap, name: file.name, cropAnchor: { ...DEFAULT_ANCHOR } });
-    } catch {
-      console.warn("Skipped unreadable file:", file.name);
-    }
-  }
+  // Decode all files in parallel — much faster when loading multiple images at once
+  const results = await Promise.all(
+    files.map(file =>
+      createImageBitmap(file)
+        .then(bitmap => ({ bitmap, name: file.name, cropAnchor: { ...DEFAULT_ANCHOR } }))
+        .catch(() => { console.warn("Skipped unreadable file:", file.name); return null; })
+    )
+  );
+  images.push(...results.filter(Boolean));
 
   await updatePreview();
 }
