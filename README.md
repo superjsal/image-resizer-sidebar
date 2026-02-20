@@ -37,6 +37,10 @@ image-resizer/
 3. **Adjust crop anchors** — hover any card to reveal the 3×3 picker in the corner. Dimmed dots mean that axis has no slack (the image already fills it completely)
 4. **Export** — hit Download All or save individual images from their cards
 
+Ideally best used as a Sidebar if doing a lot of Blogs, ie:
+
+![Sidebar screenshot](sidebar.png)
+
 ---
 
 ## Adding a Preset Size
