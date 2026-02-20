@@ -37,9 +37,15 @@ image-resizer/
 3. **Adjust crop anchors** — hover any card to reveal the 3×3 picker in the corner. Dimmed dots mean that axis has no slack (the image already fills it completely)
 4. **Export** — hit Download All or save individual images from their cards
 
+<<<<<<< HEAD
 Ideally best used as a Sidebar if doing a lot of Blogs, ie:(You can just use the Recent Download History to drag the downloaded images over. I like to save adobe stock images as the file name LP wants first.
 
 ![Sidebar screenshot](sidebar.jpg)
+=======
+Ideally best used as a Sidebar if doing a lot of Blogs, ie:
+
+![Sidebar screenshot](sidebar.png)
+>>>>>>> 15b08f98616c396738c5c961c852aa7ac47591ea
 
 ---
 
