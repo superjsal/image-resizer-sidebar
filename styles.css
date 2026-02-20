@@ -311,6 +311,11 @@ body.light .theme-toggle .icon-sun  { display: block; }
   outline: none;
 }
 .input-group input::placeholder { color: var(--text-3); }
+
+/* Hide number input spin buttons */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; }
+input[type="number"] { -moz-appearance: textfield; }
 .input-sep { font-size: 10px; color: var(--text-3); flex-shrink: 0; }
 
 
