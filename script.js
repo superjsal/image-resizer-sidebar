@@ -62,6 +62,7 @@ const ANCHORS = [
 
 const DEFAULT_ANCHOR = { x: 0.5, y: 0.5 };
 
+function anchorKey(a) { return `${a.x},${a.y}`; }
 
 
 // --- Helpers ---
@@ -151,30 +152,62 @@ function setStatus(msg, state = "idle") {
 
 // --- Canvas drawing ---
 
-// Returns the source crop rect for a bitmap scaled to fill w×h at a given anchor.
-// Shared by drawCropped and getSlack so the math never diverges.
-function getCropRect(bitmap, w, h, anchor = DEFAULT_ANCHOR) {
+// Crops the bitmap to exactly w×h using a positional anchor (x/y each 0–1).
+// 0,0 = top-left   0.5,0.5 = center   1,1 = bottom-right
+//
+// For large reductions (> 2x) we use multi-step downscaling — halving the image
+// repeatedly until we're within 2x of the target, then doing the final draw.
+// A single-pass resample over 4-5x produces soft/mushy results; stepping avoids that.
+function drawCropped(bitmap, w, h, targetCtx, targetCanvas, anchor = DEFAULT_ANCHOR) {
   const scale = Math.max(w / bitmap.width, h / bitmap.height);
   const cropW = Math.round(w / scale);
   const cropH = Math.round(h / scale);
-  return {
-    sx: Math.floor((bitmap.width  - cropW) * anchor.x),
-    sy: Math.floor((bitmap.height - cropH) * anchor.y),
-    cropW, cropH,
-  };
-}
+  const sx    = Math.floor((bitmap.width  - cropW) * anchor.x);
+  const sy    = Math.floor((bitmap.height - cropH) * anchor.y);
 
-// Crops the bitmap to exactly w×h using a positional anchor (x/y each 0–1).
-// 0,0 = top-left   0.5,0.5 = center   1,1 = bottom-right
-function drawCropped(bitmap, w, h, targetCtx, targetCanvas, anchor = DEFAULT_ANCHOR) {
-  const { sx, sy, cropW, cropH } = getCropRect(bitmap, w, h, anchor);
   targetCanvas.width  = w;
   targetCanvas.height = h;
   targetCtx.fillStyle = "#000";
   targetCtx.fillRect(0, 0, w, h);
   targetCtx.imageSmoothingEnabled = true;
   targetCtx.imageSmoothingQuality = "high";
-  targetCtx.drawImage(bitmap, sx, sy, cropW, cropH, 0, 0, w, h);
+
+  // Only step if reducing by more than 2x in either dimension
+  if (cropW > w * 2 || cropH > h * 2) {
+    // Draw the cropped region into a working canvas at full crop size
+    let stepW = cropW;
+    let stepH = cropH;
+    const step = document.createElement("canvas");
+    const stepCtx = step.getContext("2d");
+    stepCtx.imageSmoothingEnabled = true;
+    stepCtx.imageSmoothingQuality = "high";
+    step.width  = stepW;
+    step.height = stepH;
+    stepCtx.drawImage(bitmap, sx, sy, cropW, cropH, 0, 0, stepW, stepH);
+
+    // Halve repeatedly until within 2x of the final target
+    while (stepW * 0.5 >= w && stepH * 0.5 >= h) {
+      const nextW = Math.round(stepW * 0.5);
+      const nextH = Math.round(stepH * 0.5);
+      const tmp = document.createElement("canvas");
+      tmp.width  = nextW;
+      tmp.height = nextH;
+      const tmpCtx = tmp.getContext("2d");
+      tmpCtx.imageSmoothingEnabled = true;
+      tmpCtx.imageSmoothingQuality = "high";
+      tmpCtx.drawImage(step, 0, 0, stepW, stepH, 0, 0, nextW, nextH);
+      step.width  = nextW;
+      step.height = nextH;
+      stepCtx.drawImage(tmp, 0, 0);
+      stepW = nextW;
+      stepH = nextH;
+    }
+
+    targetCtx.drawImage(step, 0, 0, stepW, stepH, 0, 0, w, h);
+  } else {
+    // Small reduction — single pass is fine
+    targetCtx.drawImage(bitmap, sx, sy, cropW, cropH, 0, 0, w, h);
+  }
 }
 
 async function bitmapToObjectURL(bitmap, w, h, quality, anchor = DEFAULT_ANCHOR) {
@@ -215,10 +248,13 @@ async function updatePreview() {
 const svgDownload = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
 const svgCheck    = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`;
 
-// Returns whether each axis has any moveable crop slack at the current output size.
+// Computes positional slack on each axis for an image at the current output size.
+// If cropW >= bitmap.width there is no horizontal slack (left = center = right).
 function getSlack(bitmap) {
   const { w, h } = activeSize;
-  const { cropW, cropH } = getCropRect(bitmap, w, h);
+  const scale = Math.max(w / bitmap.width, h / bitmap.height);
+  const cropW = Math.round(w / scale);
+  const cropH = Math.round(h / scale);
   return {
     hasH: cropW < bitmap.width - 1,
     hasV: cropH < bitmap.height - 1,
@@ -243,13 +279,13 @@ function buildAnchorPicker(imageIndex) {
     dot.title = a.label + (!hasH && !hasV ? " (fully locked)" : hLocked ? " (H locked)" : vLocked ? " (V locked)" : "");
 
     const currentAnchor = item.cropAnchor;
-    if (a.x === currentAnchor.x && a.y === currentAnchor.y) dot.classList.add("active");
+    if (anchorKey(a) === anchorKey(currentAnchor)) dot.classList.add("active");
 
     dot.addEventListener("click", e => {
       e.stopPropagation();
       images[imageIndex].cropAnchor = { x: a.x, y: a.y };
       wrap.querySelectorAll(".anchor-dot").forEach((d, di) => {
-        d.classList.toggle("active", ANCHORS[di].x === a.x && ANCHORS[di].y === a.y);
+        d.classList.toggle("active", anchorKey(ANCHORS[di]) === anchorKey({ x: a.x, y: a.y }));
       });
       refreshCard(imageIndex);
     });
@@ -413,15 +449,14 @@ async function loadImages(files) {
   setStep(2);
   setStatus(`Loading ${files.length} image${plural(files.length)}…`, "busy");
 
-  // Decode all files in parallel — much faster when loading multiple images at once
-  const results = await Promise.all(
-    files.map(file =>
-      createImageBitmap(file)
-        .then(bitmap => ({ bitmap, name: file.name, cropAnchor: { ...DEFAULT_ANCHOR } }))
-        .catch(() => { console.warn("Skipped unreadable file:", file.name); return null; })
-    )
-  );
-  images.push(...results.filter(Boolean));
+  for (const file of files) {
+    try {
+      const bitmap = await createImageBitmap(file);
+      images.push({ bitmap, name: file.name, cropAnchor: { ...DEFAULT_ANCHOR } });
+    } catch {
+      console.warn("Skipped unreadable file:", file.name);
+    }
+  }
 
   await updatePreview();
 }
@@ -589,3 +624,4 @@ if (!presetRestored) {
 canvasBadge.textContent = `${activeSize.w} × ${activeSize.h}`;
 setStep(1);
 setStatus("Choose a size, then load your images.");
+downloadBtn.disabled = true;
